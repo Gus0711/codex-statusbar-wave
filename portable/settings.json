@@ -1,0 +1,13 @@
+{
+  "settingsVersion": 4,
+  "startupConfigured": true,
+  "startWithWindows": false,
+  "theme": "Dark",
+  "positionMode": "FollowCodex",
+  "anchor": "BottomCenter",
+  "offsetX": 0,
+  "offsetY": -138,
+  "transparentBackground": false,
+  "textShadow": false,
+  "overlayScalePercent": 110
+}
