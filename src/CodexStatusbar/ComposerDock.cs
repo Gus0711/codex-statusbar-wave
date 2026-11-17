@@ -126,6 +126,7 @@ internal sealed class ComposerDockTracker : IDisposable
     private static readonly TimeSpan ResyncInterval = TimeSpan.FromSeconds(2);
     private volatile bool _composerExposed;
     public bool ComposerExposed => _composerExposed;
+    public static string ExposureReason { get; private set; } = "not-checked";
 
     private readonly object _gate = new();
     private readonly Func<IntPtr> _windowProvider;
@@ -759,6 +760,15 @@ internal sealed class ComposerDockTracker : IDisposable
     /// </summary>
     private static AutomationElement? FindComposer(AutomationElement root, TreeWalker walker)
     {
+        // Ask the accessibility provider for the editor directly. The old manual walk
+        // stopped after 4,000 nodes, so long chat transcripts could hide the composer.
+        var editors = root.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ClassNameProperty, ComposerEditorClass));
+        foreach (AutomationElement editor in editors)
+        {
+            if (!editor.Current.IsOffscreen && TryReadRect(editor, out _))
+                return TryParent(walker, editor);
+        }
         var stack = new Stack<(AutomationElement Element, int Depth)>();
         stack.Push((root, 0));
         var visited = 0;
@@ -775,7 +785,8 @@ internal sealed class ComposerDockTracker : IDisposable
             {
                 visited++;
                 if (TryReadProperties(child, out _, out _, out _, out var childClass)
-                    && string.Equals(childClass, ComposerEditorClass, StringComparison.Ordinal))
+                    && childClass.Split(' ').Contains(ComposerEditorClass, StringComparer.Ordinal)
+                    && !child.Current.IsOffscreen)
                 {
                     return TryParent(walker, child);
                 }
@@ -950,19 +961,30 @@ internal sealed class ComposerDockTracker : IDisposable
     {
         try
         {
-            if (composer.Current.IsOffscreen || !TryReadRect(composer, out var rect)) return false;
+            if (composer.Current.IsOffscreen || !TryReadRect(composer, out var rect))
+            {
+                ExposureReason = "composer-offscreen-or-empty";
+                return false;
+            }
             // A settings dialog can cover a still-mounted chat. Hit-test the input area
             // read-only so the bar also disappears behind such dialogs.
             var hit = AutomationElement.FromPoint(new System.Windows.Point(
                 rect.Left + rect.Width / 2d, rect.Top + Math.Min(16, rect.Height / 3d)));
+            var trail = new List<string>();
             for (var depth = 0; hit is not null && depth < 16; depth++)
             {
-                if (Automation.Compare(hit, composer)) return true;
+                if (Automation.Compare(hit, composer))
+                {
+                    ExposureReason = "visible";
+                    return true;
+                }
+                trail.Add(hit.Current.ControlType.ProgrammaticName + "/" + hit.Current.ClassName);
                 hit = TreeWalker.ControlViewWalker.GetParent(hit);
             }
+            ExposureReason = $"covered {rect.X},{rect.Y} {rect.Width}x{rect.Height}: " + string.Join(" > ", trail);
         }
-        catch (ElementNotAvailableException) { }
-        catch (InvalidOperationException) { }
+        catch (ElementNotAvailableException) { ExposureReason = "stale-element"; }
+        catch (InvalidOperationException) { ExposureReason = "unavailable-element"; }
         return false;
     }
 

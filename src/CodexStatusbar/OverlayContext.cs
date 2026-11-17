@@ -1547,6 +1547,13 @@ internal sealed class OverlayContext : ApplicationContext, IFastPathTarget
         if (!_dockTracker.ComposerExposed || composer.WindowHandle != target.HostWindow.Handle.ToInt64()
             || composer.ComposerRect.IsEmpty)
         {
+            var reason = "composer visibility: " + ComposerDockTracker.ExposureReason
+                + $"; source={composer.Source}; failure={composer.Failure}; rect={composer.ComposerRect}";
+            if (_lastComposerVisibilityReason != reason)
+            {
+                _lastComposerVisibilityReason = reason;
+                _debug.Event(reason);
+            }
             _form.Hide();
             StopOutsideClickPolling();
             return;
@@ -1672,6 +1679,8 @@ internal sealed class OverlayContext : ApplicationContext, IFastPathTarget
         UpdateOutsideClickPolling();
         _lastDesiredWindowBounds = layout.WindowBounds;
     }
+
+    private string? _lastComposerVisibilityReason;
 
     private void HideForUnusableHost(CodexWindowTarget? target = null)
     {
